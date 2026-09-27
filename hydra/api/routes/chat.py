@@ -69,6 +69,51 @@ def _detect_required_capabilities(request: ChatCompletionRequest) -> set[str]:
     return caps
 
 
+def _sanitize_json_schema(schema):
+    """Gemini only accepts a subset of JSON Schema (no type unions, $ref, additionalProperties)."""
+    if schema is None:
+        return {"type": "object", "properties": {}}
+    if not isinstance(schema, dict):
+        return schema
+
+    skip = {
+        "$schema", "$id", "$ref", "$defs", "definitions", "additionalProperties",
+        "unevaluatedProperties", "prefixItems", "examples", "default", "const",
+    }
+    out = {}
+    for key, value in schema.items():
+        if key in skip:
+            continue
+        if key == "type":
+            if isinstance(value, list):
+                types = [t for t in value if t != "null"]
+                out["type"] = types[0] if types else "string"
+            else:
+                out["type"] = value
+        elif key in ("anyOf", "oneOf", "allOf") and isinstance(value, list):
+            non_null = [item for item in value if not (isinstance(item, dict) and item.get("type") == "null")]
+            chosen = non_null[0] if non_null else (value[0] if value else {})
+            merged = _sanitize_json_schema(chosen)
+            if isinstance(merged, dict):
+                for mk, mv in merged.items():
+                    out.setdefault(mk, mv)
+        elif key == "properties" and isinstance(value, dict):
+            out["properties"] = {pk: _sanitize_json_schema(pv) for pk, pv in value.items()}
+        elif key == "items":
+            out["items"] = _sanitize_json_schema(value) if isinstance(value, dict) else value
+        elif key == "required" and isinstance(value, list):
+            out["required"] = [str(item) for item in value]
+        elif key in ("description", "enum", "minimum", "maximum", "minItems", "maxItems", "minLength", "maxLength"):
+            out[key] = value
+        elif isinstance(value, dict):
+            out[key] = _sanitize_json_schema(value)
+        else:
+            out[key] = value
+    if "type" not in out and "properties" in out:
+        out["type"] = "object"
+    return out
+
+
 def _convert_tools(tools: list[dict] | None) -> list[dict] | None:
     """Convert OpenAI-format tools to Gemini format."""
     if not tools:
@@ -89,10 +134,13 @@ def _convert_tools(tools: list[dict] | None) -> list[dict] | None:
         # Convert OpenAI function tool
         if tool.get("type") == "function":
             fn = tool.get("function", {})
+            name = fn.get("name")
+            if not name:
+                continue
             function_declarations.append({
-                "name": fn.get("name"),
-                "description": fn.get("description"),
-                "parameters": fn.get("parameters"),
+                "name": name,
+                "description": fn.get("description") or "",
+                "parameters": _sanitize_json_schema(fn.get("parameters")),
             })
             
     if function_declarations:
@@ -174,12 +222,12 @@ async def _generate_with_fallback(request: ChatCompletionRequest) -> dict:
             continue
 
         try:
-            messages = [{"role": m.role, "content": m.content} for m in request.messages]
+            messages = [m.model_dump() for m in request.messages]
 
             result = await gemini_client.generate_content(
                 api_key, model, messages,
                 temperature=request.temperature,
-                max_tokens=request.max_tokens,
+                max_tokens=request.max_tokens or 8192,
                 tools=_convert_tools(request.tools),
                 tool_config=_convert_tool_choice(request.tool_choice) or request.tool_config,
                 thinking=request.thinking,
@@ -237,6 +285,13 @@ async def _generate_with_fallback(request: ChatCompletionRequest) -> dict:
             last_error = exc
             failed_pairs.add((key_hash, model))
 
+            if exc.status_code == 400:
+                # Bad request (tool schema, payload) ? retrying other keys cannot fix this.
+                raise HTTPException(400, {
+                    "error": "upstream_invalid_request",
+                    "message": str(exc)[:500],
+                    "model": model,
+                })
             if exc.status_code == 429:
                 # We used to block the model after 2 failures, but for "Unlimited" usage
                 # with many keys, we should just keep trying different keys.
@@ -279,9 +334,44 @@ async def _stream_sse(result: dict, request_id: str):
     IDEs the streaming interface they expect.
     """
     model = result["model"]
-    content = result["content"]
+    content = result["content"] or ""
     finish_reason = result["finish_reason"]
     created = int(datetime.now(timezone.utc).timestamp())
+    fcs = (result.get("metadata") or {}).get("function_calls") or []
+    if fcs:
+        tool_calls = []
+        for i, fc in enumerate(fcs):
+            tool_calls.append({
+                "index": i,
+                "id": f"call_{uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": fc.get("name", ""),
+                    "arguments": json.dumps(fc.get("arguments") or {}),
+                },
+            })
+        data = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"tool_calls": tool_calls},
+                "finish_reason": None,
+            }],
+        }
+        yield f"data: {json.dumps(data)}\n\n"
+        final = {
+            "id": request_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
+        }
+        yield f"data: {json.dumps(final)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
 
     # Send content in chunks (~30 chars each for natural feel)
     chunk_size = 30

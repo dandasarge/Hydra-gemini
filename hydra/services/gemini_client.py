@@ -7,6 +7,7 @@ code execution, image generation, structured output, thinking, URL context, embe
 from __future__ import annotations
 
 import asyncio
+import json
 import base64
 import logging
 import time
@@ -149,7 +150,7 @@ class GeminiClient:
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         if resp.status_code != 200:
-            detail = resp.text[:300]
+            detail = resp.text[:1500]
             raise GeminiAPIError(resp.status_code, detail, model=model)
 
         data = resp.json()
@@ -264,6 +265,41 @@ class GeminiClient:
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+
+            if role == "tool":
+                result_text = content if isinstance(content, str) else json.dumps(content or "")
+                try:
+                    parsed = json.loads(result_text)
+                    response_obj = parsed if isinstance(parsed, dict) else {"result": result_text}
+                except Exception:
+                    response_obj = {"result": result_text}
+                contents.append({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": msg.get("name") or "tool",
+                            "response": response_obj,
+                        }
+                    }],
+                })
+                continue
+
+            if role == "assistant" and msg.get("tool_calls"):
+                parts = []
+                if isinstance(content, str) and content:
+                    parts.append({"text": content})
+                for tc in msg.get("tool_calls") or []:
+                    fn = tc.get("function") or {}
+                    args = fn.get("arguments") or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {"raw": args}
+                    parts.append({"functionCall": {"name": fn.get("name", ""), "args": args or {}}})
+                if parts:
+                    contents.append({"role": "model", "parts": parts})
+                continue
 
             if role == "system":
                 # System messages become systemInstruction
@@ -428,6 +464,8 @@ class GeminiClient:
             for part in parts:
                 all_parts.append(part)
 
+                if part.get("thought"):
+                    continue
                 if "text" in part:
                     text_content += part["text"]
 

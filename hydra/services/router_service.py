@@ -80,7 +80,10 @@ class RouterService:
             eligible = {
                 kh: entry
                 for kh, entry in active_keys.items()
-                if model in entry.available_models and (kh, model) not in exclude
+                if (kh, model) not in exclude and (
+                    model in (entry.available_models or [])
+                    or model == preferred_model
+                )
             }
             if not eligible:
                 fallback_count += 1
@@ -126,8 +129,10 @@ class RouterService:
         else:
             base = list(MODEL_PRIORITY)
 
-        if preferred and preferred in MODEL_RATE_LIMITS:
-            return [preferred] + [m for m in base if m != preferred]
+        if preferred:
+            order = [preferred] + [m for m in base if m != preferred]
+            if preferred in MODEL_RATE_LIMITS or preferred.startswith(("gemini-", "gemma-")):
+                return order
         return base
 
     def _score(self, health: int, usage: dict) -> float:

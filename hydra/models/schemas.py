@@ -33,8 +33,10 @@ class APIKeyEntry(BaseModel):
 
 class ChatMessage(BaseModel):
     role: str
-    content: Union[str, list[dict]] = ""  # string or multimodal parts array
+    content: Union[str, list[dict], None] = ""  # string or multimodal parts array
     tool_calls: Optional[list[dict]] = None  # OpenAI format tool calls
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 class ChatCompletionRequest(BaseModel):

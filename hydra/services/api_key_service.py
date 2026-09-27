@@ -150,7 +150,21 @@ class APIKeyService:
         raw = await r.hgetall(REDIS_KEY_APIKEYS)
         return {kh: APIKeyEntry.model_validate_json(data) for kh, data in raw.items()}
 
+    async def ensure_keys_active(self) -> int:
+        """Re-enable every stored key. Client 400s must not leave the pool empty."""
+        r = await get_redis()
+        all_keys = await self.get_all_keys()
+        for key_hash, entry in all_keys.items():
+            entry.is_active = True
+            entry.consecutive_errors = 0
+            if entry.health_score < 50:
+                entry.health_score = 50
+            await r.hset(REDIS_KEY_APIKEYS, key_hash, entry.model_dump_json())
+            await r.sadd(REDIS_KEY_ACTIVE_KEYS, key_hash)
+        return len(all_keys)
+
     async def get_active_keys(self) -> dict[str, APIKeyEntry]:
+
         """Return only active, non-disabled keys."""
         all_keys = await self.get_all_keys()
         return {kh: entry for kh, entry in all_keys.items() if entry.is_active}

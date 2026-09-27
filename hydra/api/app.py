@@ -63,6 +63,11 @@ async def lifespan(app: FastAPI):
 
     # Start background workers
     health_monitor.start()
+    try:
+        restored = await key_service.ensure_keys_active()
+        logger.info("Active API keys: %s", restored)
+    except Exception:
+        logger.exception("Failed to restore API keys")
     logger.info("Hydra Gateway v%s started on %s:%d", __version__, settings.host, settings.port)
 
     yield
@@ -189,6 +194,23 @@ def create_app() -> FastAPI:
     async def serve_dashboard():
         html_path = static_dir / "index.html"
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+    @app.get("/dashboard", include_in_schema=False)
+    async def dashboard_alias():
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/", status_code=307)
+
+    @app.get("/v1", include_in_schema=False)
+    async def v1_root():
+        return {
+            "message": "Hydra OpenAI-compatible API",
+            "base_url": "/v1",
+            "endpoints": {
+                "chat": "POST /v1/chat/completions",
+                "models": "GET /v1/models",
+                "embeddings": "POST /v1/embeddings",
+            },
+        }
 
     @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
     async def serve_docs():

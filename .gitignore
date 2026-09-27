@@ -24,6 +24,9 @@ env/
 # Environment
 .env
 keys.json
+keys.json.bak
+*.bak
+docker/*.bak*
 
 # OS
 .DS_Store

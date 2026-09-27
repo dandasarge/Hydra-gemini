@@ -1,19 +1,19 @@
 version: '3.8'
 
+# Standalone Hydra stack — own Redis, no forgemmo dependency.
 services:
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
+    container_name: hydra-redis
     restart: unless-stopped
+    volumes:
+      - hydra_redis_data:/data
 
-  tui:
+  hydra:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    container_name: hydra-gemini
     ports:
       - "8000:8000"
     environment:
@@ -21,8 +21,9 @@ services:
     depends_on:
       - redis
     volumes:
-      - ../keys.json:/app/keys.json
+      - ../keys.json:/app/keys.json:ro
+    command: ["hydra", "gateway", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
 
 volumes:
-  redis_data:
+  hydra_redis_data:

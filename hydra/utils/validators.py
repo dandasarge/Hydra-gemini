@@ -8,6 +8,13 @@ from pathlib import Path
 from typing import Any
 
 
+def _looks_like_gemini_api_key(key: str) -> bool:
+    """Accept legacy AIzaSy... and new AQ.... Gemini API keys from AI Studio."""
+    if not key or len(key) < 20:
+        return False
+    return key.startswith("AIza") or key.startswith("AQ.")
+
+
 def validate_keys_json(path: str) -> list[dict[str, str]]:
     """Load and validate a keys JSON file.
 
@@ -58,10 +65,10 @@ def validate_keys_json(path: str) -> list[dict[str, str]]:
             raise ValueError(f"Entry #{i + 1}: 'email' and 'api_key' are required")
         if not _looks_like_email(email):
             raise ValueError(f"Entry #{i + 1}: Invalid email format: {email}")
-        if not api_key.startswith("AIza"):
+        if not _looks_like_gemini_api_key(api_key):
             raise ValueError(
                 f"Entry #{i + 1} ({email}): API key doesn't look like a Gemini key "
-                "(should start with 'AIza')"
+                "(should start with 'AIza' or 'AQ.')"
             )
 
         # Warn about duplicate project IDs (rate limits are per project!)
@@ -92,4 +99,4 @@ def _looks_like_email(s: str) -> bool:
 
 def validate_api_key_format(key: str) -> bool:
     """Check if a string looks like a Gemini API key."""
-    return bool(key and key.startswith("AIza") and len(key) > 20)
+    return _looks_like_gemini_api_key(key)

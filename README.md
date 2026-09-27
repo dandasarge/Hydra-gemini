@@ -28,10 +28,10 @@
 ---
 
 ## ✨ Features
-- **Unlimited Usage**: Aggregate multiple free-tier keys (15 RPM each) into a single high-throughput endpoint.
+- **Unlimited Usage**: Aggregate multiple free-tier keys into a single high-throughput endpoint (RPM/RPD vary by model; lite tiers up to 15 RPM / 500 RPD each).
 - **Failover & Rotation**: Automatically detects `429` (Rate Limit) and switches to the next healthy key instantly.
 - **OpenAI Compatible**: Drop-in replacement for `openai` SDKs, Cursor, VS Code, and LangChain.
-- **Smart Routing**: Supports `gemini-2.5-flash`, `gemini-2.5-pro`, and `gemini-2.0-flash-thinking` with improved reasoning.
+- **Smart Routing**: Routes across free-tier Gemini 3.x / 2.5 models — `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3-flash-preview`, `gemini-3.7-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, `gemini-2.5-flash-lite`, plus `gemini-2.5-flash-image` and `gemini-embedding-001`.
 - **Visual Dashboard**: Monitor key health, RPM, and errors in real-time.
 - **Secure Tunneling**: Expose your localhost API to the internet via Cloudflare Tunnel.
 
@@ -103,7 +103,7 @@ You can use Hydra as the backend for AI coding assistants like **Roo Code** or *
 1.  **API Provider**: `OpenAI Compatible`
 2.  **Base URL**: `http://localhost:8000/v1` (or your Tunnel URL)
 3.  **API Key**: `sk-hydra-local` (or generate one with `hydra tokens create`)
-4.  **Model ID**: `gemini-2.5-flash` (or `gemini-2.5-pro`)
+4.  **Model ID**: `gemini-3.5-flash-lite` (or `gemini-3.6-flash`)
 
 ### Cursor / other OpenAI-compatible tools
 Hydra works with any tool that supports the OpenAI API format. Just point the `baseUrl` to Hydra and use any model name.
@@ -199,7 +199,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash-lite",
     messages=[{"role": "user", "content": "Hello!"}],
     stream=True
 )
@@ -218,10 +218,12 @@ const client = new OpenAI({
 ```
 
 ### Supported Models
--   `gemini-2.5-flash` (Fast, efficient)
--   `gemini-2.5-pro` (Reasoning, coding)
--   `gemini-2.0-flash-thinking-exp` (Thinking model)
--   *Any new model Google releases is automatically supported.*
+-   `gemini-3.6-flash` / `gemini-3.5-flash` / `gemini-3.7-flash` (newest free-tier flash)
+-   `gemini-3-flash-preview` (Gemini 3 flash preview)
+-   `gemini-3.5-flash-lite` / `gemini-3.1-flash-lite` (highest free-tier RPD)
+-   `gemini-2.5-flash-lite` (reliable fallback)
+-   `gemini-2.5-flash-image` (image generation)
+-   `gemini-embedding-001` (embeddings)
 
 ---
 
@@ -232,7 +234,7 @@ Send images using standard OpenAI format (URL or Base64).
 
 ```python
 response = client.chat.completions.create(
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash-lite",
     messages=[
         {
             "role": "user",
